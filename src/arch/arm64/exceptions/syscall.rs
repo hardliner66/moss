@@ -11,7 +11,7 @@ use crate::{
                 readlink::sys_readlinkat,
                 stat::sys_newfstatat,
             },
-            chdir::{sys_chdir, sys_getcwd},
+            chdir::sys_chdir,
             close::sys_close,
             ioctl::sys_ioctl,
             iov::{sys_readv, sys_writev},
@@ -21,7 +21,7 @@ use crate::{
             stat::sys_fstat,
         },
     },
-    kernel::uname::sys_uname,
+    kernel::{syscall::syscall_registry, uname::sys_uname},
     memory::{
         brk::sys_brk,
         mmap::{sys_mmap, sys_munmap},
@@ -56,9 +56,112 @@ use crate::{
 };
 use alloc::boxed::Box;
 use libkernel::{
-    error::syscall_error::kern_err_to_syscall,
+    error::{Result, syscall_error::kern_err_to_syscall},
     memory::address::{TUA, UA, VA},
 };
+use moss_macros::moss;
+
+#[moss(syscall = 0x17)]
+async fn dup(
+    arg1: u64,
+    _arg2: u64,
+    _arg3: u64,
+    _arg4: u64,
+    _arg5: u64,
+    _arg6: u64,
+) -> Result<usize> {
+    sys_dup(arg1.into())
+}
+
+#[moss(syscall = 0x18)]
+async fn dup3(
+    arg1: u64,
+    arg2: u64,
+    arg3: u64,
+    _arg4: u64,
+    _arg5: u64,
+    _arg6: u64,
+) -> Result<usize> {
+    sys_dup3(arg1.into(), arg2.into(), arg3 as _)
+}
+
+#[moss(syscall = 0x19)]
+async fn fcntl(
+    arg1: u64,
+    arg2: u64,
+    arg3: u64,
+    _arg4: u64,
+    _arg5: u64,
+    _arg6: u64,
+) -> Result<usize> {
+    sys_fcntl(arg1.into(), arg2 as _, arg3 as _).await
+}
+
+#[moss(syscall = 0x1d)]
+async fn ioctl(
+    arg1: u64,
+    arg2: u64,
+    arg3: u64,
+    _arg4: u64,
+    _arg5: u64,
+    _arg6: u64,
+) -> Result<usize> {
+    sys_ioctl(arg1.into(), arg2 as _, arg3 as _).await
+}
+
+#[moss(syscall = 0x30)]
+async fn faccessat(
+    arg1: u64,
+    arg2: u64,
+    arg3: u64,
+    _arg4: u64,
+    _arg5: u64,
+    _arg6: u64,
+) -> Result<usize> {
+    sys_faccessat(arg1.into(), TUA::from_value(arg2 as _), arg3 as _).await
+}
+
+#[moss(syscall = 0x31)]
+async fn chdir(
+    arg1: u64,
+    _arg2: u64,
+    _arg3: u64,
+    _arg4: u64,
+    _arg5: u64,
+    _arg6: u64,
+) -> Result<usize> {
+    sys_chdir(TUA::from_value(arg1 as _)).await
+}
+
+#[moss(syscall = 0x38)]
+async fn openat(
+    arg1: u64,
+    arg2: u64,
+    arg3: u64,
+    arg4: u64,
+    _arg5: u64,
+    _arg6: u64,
+) -> Result<usize> {
+    sys_openat(
+        arg1.into(),
+        TUA::from_value(arg2 as _),
+        arg3 as _,
+        arg4 as _,
+    )
+    .await
+}
+
+#[moss(syscall = 0x39)]
+async fn close(
+    arg1: u64,
+    _arg2: u64,
+    _arg3: u64,
+    _arg4: u64,
+    _arg5: u64,
+    _arg6: u64,
+) -> Result<usize> {
+    sys_close(arg1.into()).await
+}
 
 pub async fn handle_syscall() {
     let task = current_task();
@@ -78,194 +181,180 @@ pub async fn handle_syscall() {
         )
     };
 
-    let res = match nr {
-        0x11 => sys_getcwd(TUA::from_value(arg1 as _), arg2 as _).await,
-        0x17 => sys_dup(arg1.into()),
-        0x18 => sys_dup3(arg1.into(), arg2.into(), arg3 as _),
-        0x19 => sys_fcntl(arg1.into(), arg2 as _, arg3 as _).await,
-        0x1d => sys_ioctl(arg1.into(), arg2 as _, arg3 as _).await,
-        0x30 => sys_faccessat(arg1.into(), TUA::from_value(arg2 as _), arg3 as _).await,
-        0x31 => sys_chdir(TUA::from_value(arg1 as _)).await,
-        0x38 => {
-            sys_openat(
-                arg1.into(),
-                TUA::from_value(arg2 as _),
-                arg3 as _,
-                arg4 as _,
-            )
-            .await
-        }
-        0x39 => sys_close(arg1.into()).await,
-        0x3b => sys_pipe2(TUA::from_value(arg1 as _), arg2 as _).await,
-        0x3d => sys_getdents64(arg1.into(), TUA::from_value(arg2 as _), arg3 as _).await,
-        0x3e => sys_lseek(arg1.into(), arg2 as _, arg3 as _).await,
-        0x3f => sys_read(arg1.into(), TUA::from_value(arg2 as _), arg3 as _).await,
-        0x40 => sys_write(arg1.into(), TUA::from_value(arg2 as _), arg3 as _).await,
-        0x41 => sys_readv(arg1.into(), TUA::from_value(arg2 as _), arg3 as _).await,
-        0x42 => sys_writev(arg1.into(), TUA::from_value(arg2 as _), arg3 as _).await,
-        0x47 => {
-            sys_sendfile(
-                arg1.into(),
-                arg2.into(),
-                TUA::from_value(arg3 as _),
-                arg4 as _,
-            )
-            .await
-        }
-        0x48 => {
-            sys_pselect6(
-                arg1 as _,
-                TUA::from_value(arg2 as _),
-                TUA::from_value(arg3 as _),
-                TUA::from_value(arg4 as _),
-                TUA::from_value(arg5 as _),
-                TUA::from_value(arg6 as _),
-            )
-            .await
-        }
-        0x49 => {
-            sys_ppoll(
-                TUA::from_value(arg1 as _),
-                arg2 as _,
-                TUA::from_value(arg3 as _),
-                TUA::from_value(arg4 as _),
-                arg5 as _,
-            )
-            .await
-        }
-        0x4e => {
-            sys_readlinkat(
-                arg1.into(),
-                TUA::from_value(arg2 as _),
-                TUA::from_value(arg3 as _),
-                arg4 as _,
-            )
-            .await
-        }
-        0x4f => {
-            sys_newfstatat(
-                arg1.into(),
-                TUA::from_value(arg2 as _),
-                TUA::from_value(arg3 as _),
-                arg4 as _,
-            )
-            .await
-        }
-        0x50 => sys_fstat(arg1.into(), TUA::from_value(arg2 as _)).await,
-        0x5d => sys_exit(arg1 as _),
-        0x5e => sys_exit_group(arg1 as _),
-        0x60 => sys_set_tid_address(VA::from_value(arg1 as _)).await,
-        0x65 => sys_nanosleep(TUA::from_value(arg1 as _), TUA::from_value(arg2 as _)).await,
-        0x71 => sys_clock_gettime(arg1 as _, TUA::from_value(arg2 as _)).await,
-        0x81 => sys_kill(arg1 as _, arg2.into()),
-        0x82 => sys_tkill(arg1 as _, arg2.into()),
-        0x84 => sys_sigaltstack(TUA::from_value(arg1 as _), TUA::from_value(arg2 as _)).await,
-        0x86 => {
-            sys_rt_sigaction(
-                arg1.into(),
-                TUA::from_value(arg2 as _),
-                TUA::from_value(arg3 as _),
-                arg4 as _,
-            )
-            .await
-        }
-        0x87 => {
-            sys_rt_sigprocmask(
-                arg1 as _,
-                TUA::from_value(arg2 as _),
-                TUA::from_value(arg3 as _),
-                arg4 as _,
-            )
-            .await
-        }
-        0x8b => {
-            // Special case for sys_rt_sigreturn
-            task.ctx
-                .lock_save_irq()
-                .put_signal_work(Box::pin(ArchImpl::do_signal_return()));
+    let res = match syscall_registry().get(&nr) {
+        Some(handler) => (handler.handler)(arg1, arg2, arg3, arg4, arg5, arg6).await,
+        None => match nr {
+            0x3b => sys_pipe2(TUA::from_value(arg1 as _), arg2 as _).await,
+            0x3d => sys_getdents64(arg1.into(), TUA::from_value(arg2 as _), arg3 as _).await,
+            0x3e => sys_lseek(arg1.into(), arg2 as _, arg3 as _).await,
+            0x3f => sys_read(arg1.into(), TUA::from_value(arg2 as _), arg3 as _).await,
+            0x40 => sys_write(arg1.into(), TUA::from_value(arg2 as _), arg3 as _).await,
+            0x41 => sys_readv(arg1.into(), TUA::from_value(arg2 as _), arg3 as _).await,
+            0x42 => sys_writev(arg1.into(), TUA::from_value(arg2 as _), arg3 as _).await,
+            0x47 => {
+                sys_sendfile(
+                    arg1.into(),
+                    arg2.into(),
+                    TUA::from_value(arg3 as _),
+                    arg4 as _,
+                )
+                .await
+            }
+            0x48 => {
+                sys_pselect6(
+                    arg1 as _,
+                    TUA::from_value(arg2 as _),
+                    TUA::from_value(arg3 as _),
+                    TUA::from_value(arg4 as _),
+                    TUA::from_value(arg5 as _),
+                    TUA::from_value(arg6 as _),
+                )
+                .await
+            }
+            0x49 => {
+                sys_ppoll(
+                    TUA::from_value(arg1 as _),
+                    arg2 as _,
+                    TUA::from_value(arg3 as _),
+                    TUA::from_value(arg4 as _),
+                    arg5 as _,
+                )
+                .await
+            }
+            0x4e => {
+                sys_readlinkat(
+                    arg1.into(),
+                    TUA::from_value(arg2 as _),
+                    TUA::from_value(arg3 as _),
+                    arg4 as _,
+                )
+                .await
+            }
+            0x4f => {
+                sys_newfstatat(
+                    arg1.into(),
+                    TUA::from_value(arg2 as _),
+                    TUA::from_value(arg3 as _),
+                    arg4 as _,
+                )
+                .await
+            }
+            0x50 => sys_fstat(arg1.into(), TUA::from_value(arg2 as _)).await,
+            0x5d => sys_exit(arg1 as _),
+            0x5e => sys_exit_group(arg1 as _),
+            0x60 => sys_set_tid_address(VA::from_value(arg1 as _)).await,
+            0x65 => sys_nanosleep(TUA::from_value(arg1 as _), TUA::from_value(arg2 as _)).await,
+            0x71 => sys_clock_gettime(arg1 as _, TUA::from_value(arg2 as _)).await,
+            0x81 => sys_kill(arg1 as _, arg2.into()),
+            0x82 => sys_tkill(arg1 as _, arg2.into()),
+            0x84 => sys_sigaltstack(TUA::from_value(arg1 as _), TUA::from_value(arg2 as _)).await,
+            0x86 => {
+                sys_rt_sigaction(
+                    arg1.into(),
+                    TUA::from_value(arg2 as _),
+                    TUA::from_value(arg3 as _),
+                    arg4 as _,
+                )
+                .await
+            }
+            0x87 => {
+                sys_rt_sigprocmask(
+                    arg1 as _,
+                    TUA::from_value(arg2 as _),
+                    TUA::from_value(arg3 as _),
+                    arg4 as _,
+                )
+                .await
+            }
+            0x8b => {
+                // Special case for sys_rt_sigreturn
+                task.ctx
+                    .lock_save_irq()
+                    .put_signal_work(Box::pin(ArchImpl::do_signal_return()));
 
-            return;
-        }
-        0x94 => {
-            sys_getresuid(
-                TUA::from_value(arg1 as _),
-                TUA::from_value(arg2 as _),
-                TUA::from_value(arg3 as _),
-            )
-            .await
-        }
-        0x96 => {
-            sys_getresgid(
-                TUA::from_value(arg1 as _),
-                TUA::from_value(arg2 as _),
-                TUA::from_value(arg3 as _),
-            )
-            .await
-        }
-        0x9a => sys_setpgid(arg1 as _, Pgid(arg2 as _)),
-        0x9b => sys_getpgid(arg1 as _),
-        0xa0 => sys_uname(TUA::from_value(arg1 as _)).await,
-        0xa6 => sys_umask(arg1 as _).map_err(|e| match e {}),
-        0xac => sys_getpid().map_err(|e| match e {}),
-        0xad => sys_getppid().map_err(|e| match e {}),
-        0xae => sys_getuid().map_err(|e| match e {}),
-        0xaf => sys_geteuid().map_err(|e| match e {}),
-        0xb0 => sys_getgid().map_err(|e| match e {}),
-        0xb1 => sys_getegid().map_err(|e| match e {}),
-        0xd6 => sys_brk(VA::from_value(arg1 as _))
-            .await
-            .map_err(|e| match e {}),
-        0xd7 => sys_munmap(VA::from_value(arg1 as usize), arg2 as _).await,
-        0xdc => {
-            sys_clone(
-                arg1 as _,
-                arg2 as _,
-                UA::from_value(arg3 as _),
-                UA::from_value(arg4 as _),
-                arg5 as _,
-            )
-            .await
-        }
-        0xdd => {
-            sys_execve(
-                TUA::from_value(arg1 as _),
-                TUA::from_value(arg2 as _),
-                TUA::from_value(arg3 as _),
-            )
-            .await
-        }
-        0xde => sys_mmap(arg1, arg2, arg3, arg4, arg5.into(), arg6).await,
-        0x104 => {
-            sys_wait4(
-                arg1.cast_signed() as _,
-                TUA::from_value(arg2 as _),
-                arg3 as _,
-                TUA::from_value(arg4 as _),
-            )
-            .await
-        }
-        0x105 => {
-            sys_prlimit64(
-                arg1 as _,
-                arg2 as _,
-                TUA::from_value(arg3 as _),
-                TUA::from_value(arg4 as _),
-            )
-            .await
-        }
-        0x1b7 => {
-            sys_faccessat2(
-                arg1.into(),
-                TUA::from_value(arg2 as _),
-                arg3 as _,
-                arg4 as _,
-            )
-            .await
-        }
-        _ => panic!(
-            "Unhandled syscall 0x{nr:x}, PC: 0x{:x}",
-            current_task().ctx.lock_save_irq().user().elr_el1
-        ),
+                return;
+            }
+            0x94 => {
+                sys_getresuid(
+                    TUA::from_value(arg1 as _),
+                    TUA::from_value(arg2 as _),
+                    TUA::from_value(arg3 as _),
+                )
+                .await
+            }
+            0x96 => {
+                sys_getresgid(
+                    TUA::from_value(arg1 as _),
+                    TUA::from_value(arg2 as _),
+                    TUA::from_value(arg3 as _),
+                )
+                .await
+            }
+            0x9a => sys_setpgid(arg1 as _, Pgid(arg2 as _)),
+            0x9b => sys_getpgid(arg1 as _),
+            0xa0 => sys_uname(TUA::from_value(arg1 as _)).await,
+            0xa6 => sys_umask(arg1 as _).map_err(|e| match e {}),
+            0xac => sys_getpid().map_err(|e| match e {}),
+            0xad => sys_getppid().map_err(|e| match e {}),
+            0xae => sys_getuid().map_err(|e| match e {}),
+            0xaf => sys_geteuid().map_err(|e| match e {}),
+            0xb0 => sys_getgid().map_err(|e| match e {}),
+            0xb1 => sys_getegid().map_err(|e| match e {}),
+            0xd6 => sys_brk(VA::from_value(arg1 as _))
+                .await
+                .map_err(|e| match e {}),
+            0xd7 => sys_munmap(VA::from_value(arg1 as usize), arg2 as _).await,
+            0xdc => {
+                sys_clone(
+                    arg1 as _,
+                    arg2 as _,
+                    UA::from_value(arg3 as _),
+                    UA::from_value(arg4 as _),
+                    arg5 as _,
+                )
+                .await
+            }
+            0xdd => {
+                sys_execve(
+                    TUA::from_value(arg1 as _),
+                    TUA::from_value(arg2 as _),
+                    TUA::from_value(arg3 as _),
+                )
+                .await
+            }
+            0xde => sys_mmap(arg1, arg2, arg3, arg4, arg5.into(), arg6).await,
+            0x104 => {
+                sys_wait4(
+                    arg1.cast_signed() as _,
+                    TUA::from_value(arg2 as _),
+                    arg3 as _,
+                    TUA::from_value(arg4 as _),
+                )
+                .await
+            }
+            0x105 => {
+                sys_prlimit64(
+                    arg1 as _,
+                    arg2 as _,
+                    TUA::from_value(arg3 as _),
+                    TUA::from_value(arg4 as _),
+                )
+                .await
+            }
+            0x1b7 => {
+                sys_faccessat2(
+                    arg1.into(),
+                    TUA::from_value(arg2 as _),
+                    arg3 as _,
+                    arg4 as _,
+                )
+                .await
+            }
+            _ => panic!(
+                "Unhandled syscall 0x{nr:x}, PC: 0x{:x}",
+                current_task().ctx.lock_save_irq().user().elr_el1
+            ),
+        },
     };
 
     let ret_val = match res {

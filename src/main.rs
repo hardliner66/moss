@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(used_with_arg)]
+#![feature(type_alias_impl_trait)]
 use alloc::{
     boxed::Box,
     string::{String, ToString},
@@ -20,7 +21,7 @@ use libkernel::{
         region::PhysMemoryRegion,
     },
 };
-use log::{error, warn};
+use log::{error, info, warn};
 use process::ctx::UserCtx;
 use sched::{current_task, sched_init, spawn_kernel_work, uspc_ret::dispatch_userspace_task};
 
@@ -190,6 +191,8 @@ pub fn kmain(args: String, ctx_frame: *mut UserCtx) {
     let kopts = parse_args(&args);
 
     spawn_kernel_work(launch_init(kopts));
+
+    info!("Implemented syscalls: {:#?}", kernel::syscall::SYSCALLS);
 
     dispatch_userspace_task(ctx_frame)
 }

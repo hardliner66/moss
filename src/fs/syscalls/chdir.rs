@@ -10,18 +10,25 @@ use libkernel::{
     fs::path::Path,
     memory::address::{TUA, UA},
 };
+use moss_macros::moss;
 
-pub async fn sys_getcwd(buf: UA, len: usize) -> Result<usize> {
+#[moss(syscall = 0x11)]
+async fn getcwd(arg1: u64, arg2: u64, _: u64, _: u64, _: u64, _: u64) -> Result<usize> {
+    let buf: UA = TUA::from_value(arg1 as _);
+    let len: usize = arg2 as _;
+
     let task = current_task();
     let path = task.cwd.lock_save_irq().1.as_str().to_string();
-    let cstr = CString::from_str(&path).map_err(|_| KernelError::InvalidValue)?;
+    let cstr = CString::from_str(&path)
+        .map_err(|_| KernelError::InvalidValue)
+        .unwrap();
     let slice = cstr.as_bytes_with_nul();
 
     if slice.len() > len {
         return Err(KernelError::TooLarge);
     }
 
-    copy_to_user_slice(slice, buf).await?;
+    copy_to_user_slice(slice, buf).await.unwrap();
 
     Ok(buf.value())
 }

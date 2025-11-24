@@ -8,6 +8,7 @@ edition = "2024"
 
 [dependencies]
 libkernel = { path = "libkernel" }
+moss_macros = { path = "macros" }
 aarch64-cpu = "11.1.0"
 arm-pl011-uart = { version = "0.3.1", default-features = false }
 linked_list_allocator = "0.10.5"
@@ -26,6 +27,7 @@ num-traits = { version = "0.2", default-features = false }
 ringbuf = { version = "0.4.8", default-features = false, features = ["alloc"] }
 bitflags = "2.9.1"
 futures = { version = "0.3.31", default-features = false, features = ["alloc"] }
+linkme = "0.3.35"
 
 [profile.release]
 strip = true
