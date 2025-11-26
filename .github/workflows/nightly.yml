@@ -1,0 +1,44 @@
+name: Nightly Build
+
+on:
+    workflow_dispatch: # Manual trigger
+    schedule:
+        - cron: "0 4 * * *" # Every day at 4 AM UTC
+
+permissions:
+    contents: write
+
+jobs:
+    build:
+        name: Nightly Build
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+              with:
+                  submodules: recursive
+
+            # Use the toolchain from rust-toolchain.toml
+            - name: Install Rust
+              uses: actions-rust-lang/setup-rust-toolchain@v1
+
+            - name: Build Kernel
+              run: |
+                  cargo build --release
+
+            - name: Build image
+              run: |
+                  ./scripts/build-deps.sh
+                  ./scripts/create-image.sh
+
+            - name: Create release zip
+              run: |
+                  tar -czf "nightly.zip" target/aarch64-unknown-none-softfloat/release/moss.bin moss.img
+
+            - name: Publish artifact to nightly release
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  gh release delete nightly --yes
+                  gh release create nightly --prerelease --title "Nightly Build" --notes "Automated nightly build" nightly.zip#moss_nightly.zip
