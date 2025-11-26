@@ -13,6 +13,7 @@ use core::panic::PanicInfo;
 use drivers::{fdt_prober::get_fdt, fs::register_fs_drivers};
 use fs::VFS;
 use getargs::{Opt, Options};
+use kernel::syscall::SyscallHandler;
 use libkernel::{
     CpuOps, VirtualMemory,
     fs::{BlockDevice, OpenFlags, blk::ramdisk::RamdiskBlkDev, path::Path, pathbuf::PathBuf},
@@ -184,6 +185,15 @@ fn parse_args(args: &str) -> KOptions {
 }
 
 pub fn kmain(args: String, ctx_frame: *mut UserCtx) {
+    info!(
+        "Implemented syscalls:\n{}",
+        crate::kernel::syscall::SYSCALLS
+            .iter()
+            .map(|SyscallHandler { name, hex, .. }| alloc::format!("SYSCALL: {} - {}", hex, name))
+            .collect::<Vec<String>>()
+            .join("\n")
+    );
+
     sched_init();
 
     register_fs_drivers();
@@ -191,8 +201,6 @@ pub fn kmain(args: String, ctx_frame: *mut UserCtx) {
     let kopts = parse_args(&args);
 
     spawn_kernel_work(launch_init(kopts));
-
-    info!("Implemented syscalls: {:#?}", kernel::syscall::SYSCALLS);
 
     dispatch_userspace_task(ctx_frame)
 }
